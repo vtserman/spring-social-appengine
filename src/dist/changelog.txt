@@ -1,0 +1,4 @@
+Spring Social App Engine 1.0.0 Milestone 1 (October 16, 2012)
+==================================================
+Improvements
+Bug Fixes

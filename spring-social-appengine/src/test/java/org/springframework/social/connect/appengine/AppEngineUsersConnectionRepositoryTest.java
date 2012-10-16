@@ -48,14 +48,32 @@ import com.google.appengine.api.datastore.KeyFactory;
 import com.google.appengine.api.datastore.Query;
 import com.google.appengine.api.datastore.Query.FilterOperator;
 import com.google.appengine.api.datastore.Transaction;
+import com.google.appengine.api.datastore.dev.HighRepJobPolicy;
 import com.google.appengine.tools.development.testing.LocalDatastoreServiceTestConfig;
 import com.google.appengine.tools.development.testing.LocalServiceTestHelper;
 
 public class AppEngineUsersConnectionRepositoryTest {
+	private static final class CustomHighRepJobPolicy implements HighRepJobPolicy {
+		static int count = 0;
+
+		@Override
+		public boolean shouldApplyNewJob(Key entityGroup) {
+			// every other new job fails to apply
+			return count++ % 2 == 0;
+		}
+
+		@Override
+		public boolean shouldRollForwardExistingJob(Key entityGroup) {
+			// every other exsting job fails to apply
+			return count++ % 2 == 0;
+		}
+	}
 	
 	private final LocalServiceTestHelper helper =
-      new LocalServiceTestHelper(new LocalDatastoreServiceTestConfig().setNoStorage(false)
-          .setDefaultHighRepJobPolicyUnappliedJobPercentage(100));
+      new LocalServiceTestHelper(new LocalDatastoreServiceTestConfig()
+      		.setNoStorage(true)
+          .setAlternateHighRepJobPolicyClass(CustomHighRepJobPolicy.class));
+	//.setDefaultHighRepJobPolicyUnappliedJobPercentage(100));
 
 	private ConnectionFactoryRegistry connectionFactoryRegistry;
 	private TestFacebookConnectionFactory connectionFactory;
@@ -294,7 +312,9 @@ public class AppEngineUsersConnectionRepositoryTest {
 		insertFacebookConnection();
 		insertFacebookConnection2();
 		DatastoreService ds = DatastoreServiceFactory.getDatastoreService();		
-		Query query = new Query(getKindPrefix() + "UserConnection").setFilter(FilterOperator.EQUAL.of("providerId", "facebook"));
+		Query query = new Query(getKindPrefix() + "UserConnection")
+			.setAncestor(KeyFactory.createKey(getKindPrefix() + "User", "1"))
+			.setFilter(FilterOperator.EQUAL.of("providerId", "facebook"));
 		int countEntities = ds.prepare(query).countEntities(withLimit(1));
 		assertTrue(countEntities != 0);
 		connectionRepository.removeConnections("facebook");
@@ -311,13 +331,14 @@ public class AppEngineUsersConnectionRepositoryTest {
 	public void removeConnection() {
 		insertFacebookConnection();
 		DatastoreService ds = DatastoreServiceFactory.getDatastoreService();		
-		Query query = new Query(getKindPrefix() + "UserConnection").setFilter(FilterOperator.EQUAL.of("providerId", "facebook"));
+		Query query = new Query(getKindPrefix() + "UserConnection")
+			.setAncestor(KeyFactory.createKey(getKindPrefix() + "User", "1"))
+			.setFilter(FilterOperator.EQUAL.of("providerId", "facebook"));
 		int countEntities = ds.prepare(query).countEntities(withLimit(1));
 		assertTrue(countEntities != 0);		
 		connectionRepository.removeConnection(new ConnectionKey("facebook", "9"));
 		countEntities = ds.prepare(query).countEntities(withLimit(1));
-		assertTrue(countEntities == 0);
-		//assertFalse(dataAccessor.queryForObject("select exists (select 1 from " + getTablePrefix() + "UserConnection where providerId = 'facebook')", Boolean.class));		
+		assertTrue(countEntities == 0);		
 	}
 
 	@Test
@@ -401,7 +422,7 @@ public class AppEngineUsersConnectionRepositoryTest {
 		DatastoreService ds = DatastoreServiceFactory.getDatastoreService();
 		String connectionKeyName = providerId + "-" + userId + "-" + providerUserId;
 		// Create a new Entity with the specified kind and key name and user as parent Entity.
-		Key userKey = KeyFactory.createKey("User", userId);		
+		Key userKey = KeyFactory.createKey(getKindPrefix() + "User", userId);		
 		Entity userConnection = new Entity(getKindPrefix() + "UserConnection", connectionKeyName, userKey);
 		userConnection.setProperty("userId", userId);
 		userConnection.setProperty("providerId", providerId);
@@ -421,13 +442,7 @@ public class AppEngineUsersConnectionRepositoryTest {
 			txn.commit();			
 		} finally {
 			if (txn.isActive()) txn.rollback();
-		}
-		final Key key = KeyFactory.createKey(getKindPrefix() + "UserConnection", connectionKeyName);
-		try {
-			ds.get(key);
-		} catch (EntityNotFoundException e) {			
-			e.printStackTrace();
-		}
+		}		
 	}
 	
 	

@@ -63,7 +63,7 @@ public interface ConnectionInterceptor<S> {
 	
 	/**
 	 * Called during connection updating, right before updating Connection
-	 * @param userid user id
+	 * @param userId user id
 	 * @param connection the connection that is being updated
 	 */
 	public void beforeUpdate(String userId, Connection<S> connection);

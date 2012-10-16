@@ -89,14 +89,15 @@ public class AppEngineUsersConnectionRepository implements UsersConnectionReposi
 			FilterOperator.EQUAL.of("providerId", key.getProviderId()),
 			FilterOperator.EQUAL.of("providerUserId", key.getProviderUserId())
 		);		
-		Query query = new Query(getKind()).setFilter(filter);
+		Query query = new Query(getKind())
+			.setFilter(filter);
 		List<String> localUserIds = DatastoreUtils.queryForList(datastore.prepare(query), userIdMapper);
-		if (localUserIds.size() == 0) {
-			if (connectionSignUp != null) {
+		if (localUserIds.size() == 0 && connectionSignUp != null) {			
 				String newUserId = connectionSignUp.execute(connection);
-				createConnectionRepository(newUserId).addConnection(connection);
-				return Arrays.asList(newUserId);
-			}
+				if (newUserId != null) {
+					createConnectionRepository(newUserId).addConnection(connection);
+					return Arrays.asList(newUserId);
+				}
 		}
 		return localUserIds;
 	}
@@ -107,7 +108,8 @@ public class AppEngineUsersConnectionRepository implements UsersConnectionReposi
 			FilterOperator.EQUAL.of("providerId", providerId),
 			FilterOperator.IN.of("providerUserId", providerUserIds)
 		);
-		Query query = new Query(getKind()).setFilter(filter);
+		Query query = new Query(getKind())
+			.setFilter(filter);
 		List<String> resultList = DatastoreUtils.queryForList(datastore.prepare(query), userIdMapper);
 		return new HashSet<String>(resultList);
 	}

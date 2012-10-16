@@ -1,0 +1,161 @@
+configure(allprojects) {
+    apply plugin: 'java'
+    apply plugin: 'eclipse'
+    apply plugin: 'idea'
+
+    group = 'org.springframework.social.appengine'
+
+    sourceCompatibility=1.6
+    targetCompatibility=1.6
+
+    ext {      
+      junitVersion = '4.10'
+      mockitoVersion = '1.9.0'      
+      springVersion = '3.1.2.RELEASE'
+      springSecurityVersion = '3.1.1.RELEASE'
+      springTestMvcVersion = '1.0.0.BUILD-SNAPSHOT'      
+      springSocialVersion = '1.0.2.RELEASE'
+      gaeVersion = '1.7.2'
+    }
+
+    [compileJava, compileTestJava]*.options*.compilerArgs = ['-Xlint:none']
+
+    sourceSets.test.resources.srcDirs = ['src/test/resources', 'src/test/java']
+
+    test.systemProperty("java.awt.headless", "true")
+
+    repositories {
+        mavenCentral()
+        maven { url "http://repo.springsource.org/libs-snapshot" }
+        maven { url "http://maven.springframework.org/release" }
+        maven { url "http://maven.springframework.org/release" }
+        maven { url "http://maven.springframework.org/snapshot" }
+        maven { url "http://maven-gae-plugin.googlecode.com/svn/repository" }
+        maven { url "https://repository.jboss.org/nexus/content/repositories/releases" }
+    }
+
+    dependencies {		
+        testCompile "junit:junit-dep:$junitVersion"
+        testCompile "org.mockito:mockito-core:$mockitoVersion"
+        testCompile "org.springframework:spring-test:$springVersion"
+    }
+}
+
+configure(subprojects) { subproject ->
+    apply from: "${rootProject.projectDir}/publish-maven.gradle"
+
+    jar {
+        manifest.attributes['Implementation-Title'] = subproject.name
+        manifest.attributes['Implementation-Version'] = subproject.version
+
+        from("${rootProject.projectDir}/src/dist") {
+            include "license.txt"
+            include "notice.txt"
+            into "META-INF"
+            expand(copyright: new Date().format('yyyy'), version: project.version)
+        }
+    }
+
+    javadoc {
+        options.memberLevel = org.gradle.external.javadoc.JavadocMemberLevel.PROTECTED
+        options.author = true
+        options.header = project.name
+    }
+
+    task sourcesJar(type: Jar, dependsOn:classes) {
+        classifier = 'sources'
+        from sourceSets.main.allJava
+    }
+
+    task javadocJar(type: Jar) {
+        classifier = 'javadoc'
+        from javadoc
+    }
+
+    artifacts {
+        archives sourcesJar
+        archives javadocJar
+    }
+}
+
+
+project('spring-social-appengine') {
+    description = 'Google AppEngine Intergation module containing the Google AppEngine-based ConnectionRepository implementation'
+    dependencies {
+        compile ("org.springframework:spring-jdbc:$springVersion")
+        compile ("org.springframework.security:spring-security-crypto:$springSecurityVersion")
+        compile ("org.springframework.social:spring-social-core:$springSocialVersion")
+        compile "com.google.appengine:appengine-api-1.0-sdk:$gaeVersion"        
+        testCompile "com.google.appengine:appengine-testing:$gaeVersion"
+        testCompile "com.google.appengine:appengine-api-labs:$gaeVersion"
+        testCompile "com.google.appengine:appengine-api-stubs:$gaeVersion"        
+    }
+}
+
+configure(rootProject) {
+    description = 'Spring Social AppEngine Intergation'
+
+    // don't publish the default jar for the root project
+    configurations.archives.artifacts.clear()
+
+    dependencies { // for integration tests
+    }
+    
+    task distZip(type: Zip) {
+        group = 'Distribution'
+        classifier = 'dist'
+        description = "Builds -${classifier} archive, containing all jars, " +
+                      "suitable for community download page."
+
+        ext.baseDir = "${project.name}-${project.version}";
+
+        from('src/dist') {
+            include 'readme.txt'
+            include 'license.txt'
+            include 'notice.txt'
+            into "${baseDir}"
+            expand(copyright: new Date().format('yyyy'), version: project.version)
+        }
+
+        subprojects.each { subproject ->
+            into ("${baseDir}/libs") {
+                from subproject.jar
+                if (subproject.tasks.findByPath('sourcesJar')) {
+                    from subproject.sourcesJar
+                }
+                if (subproject.tasks.findByPath('javadocJar')) {
+                    from subproject.javadocJar
+                }
+            }
+        }
+    }
+
+    artifacts {
+        archives distZip
+    }
+
+    task wrapper(type: Wrapper) {
+        description = 'Generates gradlew[.bat] scripts'
+        gradleVersion = '1.1'
+    }
+
+}
+
+task updateRootDocs << {
+    copy {
+        from 'src/dist'
+        into "${rootProject.projectDir}"
+        include 'notice.txt'
+        expand(copyright: new Date().format('yyyy'), version: project.version)
+        rename { filename -> 'NOTICE' }
+    }
+
+    copy {
+        from 'src/dist'
+        into "${rootProject.projectDir}"
+        include 'license.txt'
+        rename { filename -> 'LICENSE' }
+    }
+}
+
+build.dependsOn('updateRootDocs')

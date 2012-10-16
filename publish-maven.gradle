@@ -1,0 +1,64 @@
+apply plugin: 'maven'
+
+install {
+    repositories.mavenInstaller {
+        customizePom(pom, project)
+    }
+}
+
+uploadArchives {
+    repositories.mavenDeployer {
+        repository(url: "file:///home/vtserman/Dropbox/workspaces/vtserman-maven2/releases")        
+    }
+}
+
+// see http://evgeny-goldin.com/wiki/Gradle  (section 'Setting the repository URL at the time the DAG is ready')
+gradle.taskGraph.whenReady { tg ->
+    if (!tg.hasTask(':makeRelease')) {
+        version += '-SNAPSHOT'
+        uploadArchives.repositories['mavenDeployer'].repository.url = "file:///home/vtserman/Dropbox/workspaces/vtserman-maven2/snapshots"
+    }
+}
+
+task makeSnapshot(dependsOn: 'uploadArchives')
+
+task makeRelease(dependsOn: 'uploadArchives')
+
+def customizePom(pom, gradleProject) {
+    pom.whenConfigured { generatedPom ->        
+        // eliminate test-scoped dependencies (no need in maven central poms)
+        generatedPom.dependencies.removeAll { dep ->
+            dep.scope == 'test'
+        }
+
+        // add all items necessary for maven central publication
+        generatedPom.project {
+            name = gradleProject.description
+            description = gradleProject.description
+            url = 'https://github.com/vtserman/spring-social-appengine'
+            organization {
+                name = 'vtserman'
+                url = 'http://github.com/vtserman'
+            }
+            licenses {
+                license {
+                    name 'The Apache Software License, Version 2.0'
+                    url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                    distribution 'repo'
+                }
+            }
+            scm {
+                url = 'https://github.com/vtserman/spring-social-appengine'
+                connection = 'scm:git:git://github.com/vtserman/spring-social-appengine'
+                developerConnection = 'scm:git:git://github.com/vtserman/spring-social-appengine'
+            }
+            developers {
+                developer {
+                    id = 'vtserman'
+                    name = 'Vladislav Tserman'
+                    email = 'vladjan@gmail.com'
+                }
+            }
+        }
+    }
+}

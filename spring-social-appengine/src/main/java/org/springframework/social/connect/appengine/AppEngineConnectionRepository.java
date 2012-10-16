@@ -70,21 +70,26 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 	private final TextEncryptor textEncryptor;		
 	private final String kindPrefix;
 	private final MultiValueMap<Class<?>, ConnectionInterceptor<?>> interceptors = new LinkedMultiValueMap<Class<?>, ConnectionInterceptor<?>>();
+	private final Key userKey;
 		
 	public AppEngineConnectionRepository(String userId, ConnectionFactoryLocator connectionFactoryLocator, 
 			TextEncryptor textEncryptor, DatastoreService datastore, String kindPrefix)
 	{
 		this.userId = userId;
+		this.userKey = KeyFactory.createKey(getParentKind(), userId);
 		this.connectionFactoryLocator = connectionFactoryLocator;
 		this.textEncryptor = textEncryptor;
 		this.datastore = datastore;
 		this.kindPrefix = kindPrefix;
 	}
 	
+	private String getParentKind() {
+		return (kindPrefix != null ? kindPrefix : "") + "User"; 
+	}
 	
 	/** Returns kind of the entity */
-	private String getKind() {
-		return kindPrefix + "UserConnection";
+	private String getKind() {		
+		return (kindPrefix != null ? kindPrefix : "") + "UserConnection";
 	}
 	
 	@Override
@@ -93,8 +98,9 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 		Set<String> registeredProviderIds = connectionFactoryLocator.registeredProviderIds();
 		for (String registeredProviderId : registeredProviderIds) {
 			connections.put(registeredProviderId, Collections.<Connection<?>>emptyList());
-		}
+		}		
 		Query query = new Query(getKind())
+			.setAncestor(userKey)
 			.setFilter(FilterOperator.EQUAL.of("userId", userId))
 			.addSort("providerId")
 			.addSort("rank");		
@@ -115,8 +121,9 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 		final CompositeFilter filter = CompositeFilterOperator.and(
 			FilterOperator.EQUAL.of("userId", userId),
 			FilterOperator.EQUAL.of("providerId", providerId)
-		);		
+		);
 		Query query = new Query(getKind())
+			.setAncestor(userKey)
 			.setFilter(filter)
 			.addSort("rank");
 		return DatastoreUtils.queryForList(datastore.prepare(query), connectionMapper);
@@ -150,7 +157,7 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 			}
 		});
 		
-		//FIXME find more optimal way to query
+		//FIXME find more optimal way to query datastore
 		for (Entry<String, List<String>> entry : providerUserIds.entrySet()) {
 			String providerId = entry.getKey();
 			final CompositeFilter filter = CompositeFilterOperator.and(
@@ -159,9 +166,7 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 				FilterOperator.IN.of("providerUserId", entry.getValue())
 			);
 			final Query query = new Query(getKind())
-				//.addFilter("userId", Query.FilterOperator.EQUAL, userId)
-				//.addFilter("providerId", Query.FilterOperator.EQUAL, providerId)
-				//.addFilter("providerUserId", Query.FilterOperator.IN, entry.getValue())
+				.setAncestor(userKey)
 				.setFilter(filter)
 				.addSort("providerId")
 				.addSort("rank");
@@ -201,7 +206,9 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 			FilterOperator.EQUAL.of("providerId", connectionKey.getProviderId()),
 			FilterOperator.EQUAL.of("providerUserId", connectionKey.getProviderUserId())
 		);
-		final Query query = new Query(getKind()).setFilter(filter);
+		final Query query = new Query(getKind())
+			.setAncestor(userKey)
+			.setFilter(filter);
 		Entity singleEntity = null;
 		try {
 			singleEntity = datastore.prepare(query).asSingleEntity();			
@@ -240,7 +247,9 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 			FilterOperator.EQUAL.of("providerId", providerId), 
 			FilterOperator.EQUAL.of("rank", 1L)
 		);
-		final Query query = new Query(getKind()).setFilter(filter);
+		final Query query = new Query(getKind())
+			.setAncestor(userKey)
+			.setFilter(filter);
 		List<Connection<?>> resultList = DatastoreUtils.queryForList(
 				datastore.prepare(query), connectionMapper);
 		return resultList.size() > 0 ? resultList.get(0) : null;				
@@ -265,6 +274,7 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 			FilterOperator.EQUAL.of("providerId", data.getProviderId())
 		);
 		final Query query = new Query(getKind())
+			.setAncestor(userKey)
 			.setFilter(filter)			
 			.addSort("rank", SortDirection.DESCENDING);
 		List<Entity> resultList = datastore.prepare(query).asList(FetchOptions.Builder.withLimit(1));
@@ -272,7 +282,7 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 		if (singleEntity != null) rank += (Long) singleEntity.getProperty("rank");
 		
 		String connectionKeyName = createConnectionKeyName(userId, connection.getKey());		
-		Entity userConnection = new Entity(getKind(), connectionKeyName);
+		Entity userConnection = new Entity(getKind(), connectionKeyName, userKey);
 		userConnection.setProperty("userId", userId);
 		userConnection.setProperty("providerId", data.getProviderId());
 		userConnection.setProperty("providerUserId", data.getProviderUserId());
@@ -283,13 +293,13 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 		userConnection.setProperty("accessToken", encrypt(data.getAccessToken()));
 		userConnection.setProperty("secret", encrypt(data.getSecret()));
 		userConnection.setProperty("refreshToken", encrypt(data.getRefreshToken()));
-		userConnection.setProperty("expireTime", data.getExpireTime());
-		final Key key = KeyFactory.createKey(getKind(), connectionKeyName);
-		
+		userConnection.setProperty("expireTime", data.getExpireTime());		
+				
 		for (ConnectionInterceptor interceptor : interceptingConnectionsTo(connection)) {
 			interceptor.beforeCreate(userId, connection);
 		}
 		
+		final Key key = new KeyFactory.Builder(userKey).addChild(getKind(), connectionKeyName).getKey();
 		Transaction txn = datastore.beginTransaction();
 		try {			
 			try {
@@ -313,14 +323,15 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 	@Override
 	public void updateConnection(Connection<?> connection) {
 		ConnectionData data = connection.createData();
-		String connectionKeyName = createConnectionKeyName(userId, connection.getKey());
+		
 		for (ConnectionInterceptor interceptor : interceptingConnectionsTo(connection)) {
 			interceptor.beforeUpdate(userId, connection);
 		}
-		Transaction txn = datastore.beginTransaction();
-		try {
-			
-			Entity entity = datastore.get(txn, KeyFactory.createKey(getKind(), connectionKeyName));			
+		String connectionKeyName = createConnectionKeyName(userId, connection.getKey());
+		final Key connectionKey = new KeyFactory.Builder(userKey).addChild(getKind(), connectionKeyName).getKey();
+		Transaction txn = datastore.beginTransaction();		
+		try {			
+			Entity entity = datastore.get(txn, connectionKey);
 			entity.setProperty("displayName", data.getDisplayName());
 			entity.setProperty("profileUrl", data.getProfileUrl());
 			entity.setProperty("imageUrl", data.getImageUrl());
@@ -333,7 +344,6 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 			
 		} catch (EntityNotFoundException e) {
 			log.warning("There was the problem updating connection " + connection.getKey().toString() + ". No such connection exists.");
-			//throw new ConnectionNotFoundException("Connection " + connection.getKey().toString() +" not found");
 		} finally {
 			if (txn.isActive()) txn.rollback();
 		}
@@ -357,7 +367,9 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 			FilterOperator.EQUAL.of("userId", userId),
 			FilterOperator.EQUAL.of("providerId", providerId)
 		);
-		final Query query = new Query(getKind()).setFilter(filter);
+		final Query query = new Query(getKind())		
+			.setAncestor(userKey)
+			.setFilter(filter);
 		Map<Key, Connection<?>> resultMap = DatastoreUtils.queryForMap(
 				datastore.prepare(query), connectionMapper);
 		Set<Key> keys = resultMap.keySet();
@@ -383,10 +395,11 @@ class AppEngineConnectionRepository implements ConnectionRepository {
 	@SuppressWarnings({ "unchecked", "rawtypes" })
 	@Override
 	public void removeConnection(ConnectionKey connectionKey) {
-		String connectionKeyName = createConnectionKeyName(userId, connectionKey);		
+		String connectionKeyName = createConnectionKeyName(userId, connectionKey);
+		final Key key = new KeyFactory.Builder(userKey).addChild(getKind(), connectionKeyName).getKey();
 		Transaction txn = datastore.beginTransaction();
 		try {			
-			final Entity entity = datastore.get(txn, KeyFactory.createKey(getKind(), connectionKeyName));
+			final Entity entity = datastore.get(txn, key);
 			Connection<?> connection = connectionMapper.mapEntity(entity);
 			for (ConnectionInterceptor interceptor : interceptingConnectionsTo(connection)) {
 				interceptor.beforeRemove(userId, Collections.singletonList(connection));
