@@ -21,6 +21,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import com.google.appengine.api.datastore.Key;
 import org.springframework.security.crypto.encrypt.TextEncryptor;
 import org.springframework.social.connect.Connection;
 import org.springframework.social.connect.ConnectionFactoryLocator;
@@ -78,7 +79,7 @@ public class AppEngineUsersConnectionRepository implements UsersConnectionReposi
 	
 	/** Returns kind of the entity */
 	private String getKind() {
-		return kindPrefix + "UserConnection";
+		return (kindPrefix != null ? kindPrefix : "") + "UserConnection";
 	}
 	
 	
@@ -88,9 +89,9 @@ public class AppEngineUsersConnectionRepository implements UsersConnectionReposi
 		final CompositeFilter filter = CompositeFilterOperator.and(
 			FilterOperator.EQUAL.of("providerId", key.getProviderId()),
 			FilterOperator.EQUAL.of("providerUserId", key.getProviderUserId())
-		);		
-		Query query = new Query(getKind())
-			.setFilter(filter);
+		);
+        // fetch and return only keys, not full entities.
+		Query query = new Query(getKind()).setFilter(filter).setKeysOnly();
 		List<String> localUserIds = DatastoreUtils.queryForList(datastore.prepare(query), userIdMapper);
 		if (localUserIds.size() == 0 && connectionSignUp != null) {			
 				String newUserId = connectionSignUp.execute(connection);
@@ -108,8 +109,8 @@ public class AppEngineUsersConnectionRepository implements UsersConnectionReposi
 			FilterOperator.EQUAL.of("providerId", providerId),
 			FilterOperator.IN.of("providerUserId", providerUserIds)
 		);
-		Query query = new Query(getKind())
-			.setFilter(filter);
+        // fetch and return only keys, not full entities.
+		Query query = new Query(getKind()).setFilter(filter).setKeysOnly();
 		List<String> resultList = DatastoreUtils.queryForList(datastore.prepare(query), userIdMapper);
 		return new HashSet<String>(resultList);
 	}
@@ -121,13 +122,14 @@ public class AppEngineUsersConnectionRepository implements UsersConnectionReposi
 		repo.setInterceptors(interceptors);
 		return repo;
 	}
-	
+
 	private final EntityMapper<String> userIdMapper = new EntityMapper<String>() {
 		public String mapEntity(Entity entity) {
-			return (String) entity.getProperty("userId");
+            Key key = entity.getKey().getParent();
+            return key.getName();
 		}
 	};
-	
+
 	/**
 	 * Configure the list of interceptors that should receive callbacks during the connection CRUD operations.
 	 * @param interceptors the connect interceptors to add
